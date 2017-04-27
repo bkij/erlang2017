@@ -29,10 +29,17 @@
 %% Functions
 createMonitor() -> #monitor{}.
 
-station_exists(Monitor, Station_name) -> lists:any(fun(Station) -> Station#station.name == Station_name end, Monitor#monitor.stations).
+station_exists(Monitor, Station_name, Location) ->
+  lists:any(fun(Station) -> Station#station.name == Station_name or Station#station.location == Location end, Monitor#monitor.stations).
+
+getStation(Monitor, StationID) when is_tuple(StationID) ->
+  lists:filter(fun(StationID) -> Monitor#monitor.stations#station.location == StationID end, Monitor#monitor.stations);
+getStation(Monitor, StationID) ->
+  lists:filter(fun(StationID) -> Monitor#monitor.stations#station.name == StationID end, Monitor#monitor.stations).
+
 
 addStation(Monitor, Station_name, Location) when is_record(Monitor, monitor), is_tuple(Location) ->
-  case station_exists(Monitor, Station_name) of
+  case station_exists(Monitor, Station_name, Location) of
     true -> #monitor{
       stations = [Monitor#monitor.stations | #station{name=Station_name, location=Location, measurements=[]}]
     };
@@ -40,6 +47,11 @@ addStation(Monitor, Station_name, Location) when is_record(Monitor, monitor), is
   end;
 addStation(Monitor, Station_name, Location) -> erlang:error("Bad types in addStation").
 
+addValue(Monitor, StationID, Datetime, Type, Value) ->
+  case getStation(Monitor, StationID) of
+    [Station] -> nil;
+    true -> Monitor
+  end.
 
 %% API
--export([createMonitor/0, addStation/3]).
+-export([createMonitor/0, addStation/3, addValue/5]).
