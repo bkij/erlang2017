@@ -89,9 +89,38 @@ measurementMap(MList) -> lists:map(fun(Elem) -> Elem#measurement.value end, MLis
 getStationMean(Monitor, StationID, Type) ->
   case getStation(Monitor, StationID) of
     [Station] -> lists:sum(measurementMap(typeFilter(Station, Type))) /
-                 length(typeFilter(Station, Type));
+                 erlang:length(typeFilter(Station, Type));
     true -> nil
   end.
 
+dateTypeFilter(MList, Date, Type) -> lists:filter(fun(Elem) -> Elem#measurement.datetime == Date and
+                                                               Elem#measurement.type == Type
+                                                  end, MList).
+
+getAllMeasurements(Monitor) -> lists:foldl(fun(Station, Res) -> lists:concat(Station#station.measurements, Res) end,
+                                           [],
+                                           Monitor#monitor.stations).
+
+getDailyMean(Monitor, Datetime, Type) ->
+  lists:sum(measurementMap(dateTypeFilter(getAllMeasurements(Monitor), Datetime, Type))) /
+  erlang:length(dateTypeFilter(getAllMeasurements(Monitor), Datetime, Type)).
+
+getMaximumVariationStation(Monitor, Type) ->
+  varMax(variationMap(Monitor#monitor.stations), Type).
+
+varMax(List) ->
+  lists:foldl(fun({Name, Value}, {MaxName, Max}) ->
+    case Value > Max of
+      true -> {Name, Value};
+      false -> {MaxName, Max}
+    end
+              end,
+    {"", 0},
+    List).
+
+variationMap(Stations) -> {
+  Stations#station.name,
+  lists:max(measurementMap(Stations#station.measurements)) - lists:min(measurementMap(Stations#station.measurements))
+}
 %% API
--export([createMonitor/0, addStation/3, addValue/5, removeValue/4, getOneValue/4, getStationMean/3]).
+-export([createMonitor/0, addStation/3, addValue/5, removeValue/4, getOneValue/4, getStationMean/3, getDailyMean/3, getMaximumVariationStation/2]).
