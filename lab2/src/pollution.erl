@@ -8,17 +8,18 @@
 %%%-------------------------------------------------------------------
 -module(pollution).
 -author("kveld").
+-export([createMonitor/0, addStation/3, addValue/5, removeValue/4, getOneValue/4, getStationMean/3, getDailyMean/3, getMaximumVariationStation/2]).
 
 %% Data types
 -record(measurement, {
-  type :: PM10 | PM2_5 | TEMPERATURE,
+  type,
   datetime :: calendar:datetime(),
   value
 }).
 
 -record(station, {
-  name :: string(),
-  location :: tuple(float, float),
+  name,
+  location,
   measurements :: list(measurement)
 }).
 
@@ -28,10 +29,10 @@
 ).
 
 %% Functions
-createMonitor() -> #monitor{}.
+createMonitor() -> #monitor{stations=[]}.
 
 station_exists(Monitor, Station_name, Location) ->
-  lists:any(fun(Station) -> Station#station.name == Station_name or Station#station.location == Location end, Monitor#monitor.stations).
+  lists:any(fun(Station) -> Station#station.name == Station_name orelse Station#station.location == Location end, Monitor#monitor.stations).
 
 getStation(Monitor, StationID) when is_tuple(StationID) ->
   lists:filter(fun(Station) -> Station#station.location == StationID end, Monitor#monitor.stations);
@@ -44,43 +45,45 @@ dateEqual(Measurement, Date) -> Measurement#measurement.datetime == Date.
 
 addStation(Monitor, Station_name, Location) when is_record(Monitor, monitor), is_tuple(Location) ->
   case station_exists(Monitor, Station_name, Location) of
-    true -> #monitor{
-      stations = [Monitor#monitor.stations | #station{name=Station_name, location=Location, measurements=[]}]
+    false -> #monitor{
+      stations = [Monitor#monitor.stations ++ #station{name=Station_name, location=Location, measurements=[]}]
     };
-    false -> Monitor
+    true -> Monitor
   end;
 addStation(Monitor, Station_name, Location) -> erlang:error("Bad types in addStation").
 
 addValue(Monitor, StationID, Datetime, Type, Value) ->
   case getStation(Monitor, StationID) of
     [Station] -> #monitor {
-      stations = [lists:delete(Station, Monitor#monitor.stations) | #station {
+      stations = lists:delete(Station, Monitor#monitor.stations) ++ [#station {
         name = Station#station.name,
         location = Station#station.location,
-        measurements = [ lists:filter(fun(Elem) ->  typeEqual(Elem, Type) end, Station#station.measurements) |
-                         #measurement{type = Type, datetime = Datetime, value = Value}
-                       ]
+        measurements = case getOneValue(Monitor, StationID, Datetime, Type) of
+                         {} -> Station#station.measurements ++ [#measurement{type = Type, datetime = Datetime, value = Value}];
+                         _ -> Station#station.measurements
+                       end
+
       }]
     };
-    true -> Monitor
+    _ -> Monitor
   end.
 
 removeValue(Monitor, StationID, Datetime, Type) ->
   case getStation(Monitor, StationID) of
     [Station] -> #monitor {
-      stations = [lists:delete(Station, Monitor#monitor.stations) | #station {
+      stations = [lists:delete(Station, Monitor#monitor.stations) ++ #station {
         name = Station#station.name,
         location = Station#station.location,
         measurements = lists:filter(fun(Elem) -> typeEqual(Elem, Type) and dateEqual(Elem, Datetime) end, Station#station.measurements)
       }]
     };
-    true -> Monitor
+    _ -> Monitor
   end.
 
 getOneValue(Monitor, StationID, Datetime, Type) ->
   case getStation(Monitor, StationID) of
-    [Station] -> lists:last(lists:filter(fun(Elem) -> typeEqual(Elem, Type) and dateEqual(Elem, Datetime) end, Station#station.measurements);
-    true -> nil
+    [Station] -> emptyOrSome(lists:filter(fun(Elem) -> typeEqual(Elem, Type) and dateEqual(Elem, Datetime) end, Station#station.measurements));
+    _ -> {}
   end.
 
 typeFilter(Station, Type) -> lists:filter(fun(Elem) -> typeEqual(Elem, Type) end, Station#station.measurements).
@@ -93,24 +96,25 @@ getStationMean(Monitor, StationID, Type) ->
     true -> nil
   end.
 
-dateTypeFilter(MList, Date, Type) -> lists:filter(fun(Elem) -> Elem#measurement.datetime == Date and
+dateTypeFilter(MList, Date, Type) -> lists:filter(fun(Elem) -> Elem#measurement.datetime == Date andalso
                                                                Elem#measurement.type == Type
                                                   end, MList).
 
-getAllMeasurements(Monitor) -> lists:foldl(fun(Station, Res) -> lists:concat(Station#station.measurements, Res) end,
+dailyFilter(MList, Date, Type) -> lists:filter(fun(Elem) -> getDateFromDatetime(Elem#measurement.datetime) == getDateFromDatetime(Date) andalso
+  Elem#measurement.type == Type
+                                               end, MList).
+
+getAllMeasurements(Monitor) -> lists:foldl(fun(Station, Res) -> Station#station.measurements ++ Res end,
                                            [],
                                            Monitor#monitor.stations).
 
 getDailyMean(Monitor, Datetime, Type) ->
-  lists:sum(measurementMap(dateTypeFilter(getAllMeasurements(Monitor), Datetime, Type))) /
-  erlang:length(dateTypeFilter(getAllMeasurements(Monitor), Datetime, Type)).
-
-getMaximumVariationStation(Monitor, Type) ->
-  varMax(variationMap(Monitor#monitor.stations), Type).
+  lists:sum(measurementMap(dailyFilter(getAllMeasurements(Monitor), Datetime, Type))) /
+  erlang:length(dailyFilter(getAllMeasurements(Monitor), Datetime, Type)).
 
 varMax(List) ->
   lists:foldl(fun({Name, Value}, {MaxName, Max}) ->
-    case Value > Max of
+    case Value >= Max of
       true -> {Name, Value};
       false -> {MaxName, Max}
     end
@@ -118,9 +122,17 @@ varMax(List) ->
     {"", 0},
     List).
 
-variationMap(Stations) -> {
-  Stations#station.name,
-  lists:max(measurementMap(Stations#station.measurements)) - lists:min(measurementMap(Stations#station.measurements))
-}
-%% API
--export([createMonitor/0, addStation/3, addValue/5, removeValue/4, getOneValue/4, getStationMean/3, getDailyMean/3, getMaximumVariationStation/2]).
+getMaximumVariationStation(Monitor, Type) ->
+  varMax(variationMap(Monitor#monitor.stations, Type)).
+
+variationMap(Stations, Type) ->
+  TypeStations = lists:map(fun(Station) -> {Station#station.name, typeFilter(Station, Type)} end, Stations),
+  lists:map(fun({Name, Measurements}) -> {
+    Name, lists:max(lists:map(fun(El) -> El#measurement.value end, Measurements)) - lists:min(lists:map(fun(El) -> El#measurement.value end, Measurements))
+  } end, TypeStations).
+
+
+getDateFromDatetime({X, _}) -> X.
+
+emptyOrSome([X]) -> X;
+emptyOrSome([]) -> {}.
