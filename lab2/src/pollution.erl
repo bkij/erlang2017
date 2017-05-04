@@ -82,7 +82,7 @@ removeValue(Monitor, StationID, Datetime, Type) ->
 
 getOneValue(Monitor, StationID, Datetime, Type) ->
   case getStation(Monitor, StationID) of
-    [Station] -> emptyOrSome(lists:filter(fun(Elem) -> typeEqual(Elem, Type) and dateEqual(Elem, Datetime) end, Station#station.measurements));
+  [Station] -> emptyOrSome(lists:filter(fun(Elem) -> typeEqual(Elem, Type) and dateEqual(Elem, Datetime) end, Station#station.measurements));
     _ -> {}
   end.
 
